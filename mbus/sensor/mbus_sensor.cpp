@@ -91,7 +91,7 @@ void MbusSensor::loop() {
   //variable payload fields follow
   pos = 19;
   this->mbus_data_record_parse_status_ = 0;
-  while( ( pos <= (len-1) ) &&
+  while( ( pos <= (len-3) ) &&
 	( tg[pos] != MBUS_DIF_MANUFACTURER_SPECIFIC ) &&
 	( tg[pos] != MBUS_DIF_MANUFACTURER_SPECIFIC_MULTIFRAME ) )
   { //each iteration of the while loop processes one Data Record,
@@ -104,30 +104,38 @@ void MbusSensor::loop() {
 	  }
 
 	  uint8_t ret = MbusParseDataRecord(&tg[pos]);
-	  if(!ret) return; //error logging is done in MbusParseDataRecord
+	  if(!ret) { //error logging is done in MbusParseDataRecord
+	    pos=0;
+	    ESP_LOGW(TAG, " %s: Variable payload parsing aborted", sensorname);
+	    break;
+	  } 
 	  pos+=ret;
   } //end while
   
-  if( pos > (len-1) ){
-	  ESP_LOGE(TAG, " %s: Overrun while parsing telegram.", sensorname);
-	  return;
+  if(pos) { ESP_LOGD(TAG, " %s: Parsing variable payload done", sensorname); }
+
+  if( pos > (len-3) ){
+	  ESP_LOGW(TAG, " %s: Overrun while parsing telegram.", sensorname);
+	  pos=0;
   }
-  
-  ESP_LOGD(TAG, " %s: Parsing variable payload done", sensorname);
-  
+    
   //manufacturer-specific data
-  if(tg[pos] == MBUS_DIF_MANUFACTURER_SPECIFIC_MULTIFRAME){
+  if(pos && (tg[pos] == MBUS_DIF_MANUFACTURER_SPECIFIC_MULTIFRAME)){
 	  ESP_LOGW(TAG, " %s: Multitelegram readout not supported, some data may be unavailable.", sensorname);
   }
   
-  pos++;
-  uint16_t mfg_specific_begin = pos;
-  std::string manufacturer_specific_data;
-  for(pos=len-3;pos>=mfg_specific_begin;pos--){
-	sprintf(buf, "%02X ", tg[pos]);
-    manufacturer_specific_data += buf;
+
+  if(pos && ( (tg[pos] == MBUS_DIF_MANUFACTURER_SPECIFIC)
+    || (tg[pos] == MBUS_DIF_MANUFACTURER_SPECIFIC_MULTIFRAME) ) ) {
+    pos++;
+    uint16_t mfg_specific_begin = pos;
+    std::string manufacturer_specific_data;
+    for(pos=len-3;pos>=mfg_specific_begin;pos--){
+	  sprintf(buf, "%02X ", tg[pos]);
+      manufacturer_specific_data += buf;
+    }
+    ESP_LOGD(TAG, " %s: Manufacturer-specific data: %s", sensorname, manufacturer_specific_data.c_str());
   }
-  ESP_LOGD(TAG, " %s: Manufacturer-specific data: %s", sensorname, manufacturer_specific_data.c_str());
   
   //tg[len-2] checksum (verified by statemachine)
   //tg[len-1] stop byte
